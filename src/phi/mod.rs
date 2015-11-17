@@ -1,4 +1,8 @@
+use self::gfx::Sprite;
 use ::sdl2::render::Renderer;
+use ::sdl2::pixels::Color;
+use ::std::collections::HashMap;
+use ::std::path::Path;
 
 #[macro_use]
 mod events;
@@ -12,7 +16,8 @@ struct_events!{
         key_down: Down,
         key_space: Space,
         key_left: Left,
-        key_right: Right
+        key_right: Right,
+        key_return: Return
     },
     else: {
         quit: Quit { .. }
@@ -22,6 +27,8 @@ struct_events!{
 pub struct Phi<'window> {
     pub events: Events,
     pub renderer: Renderer<'window>,
+    
+    cached_fonts: HashMap<(&'static str, i32), ::sdl2_ttf::Font>,
 }
 
 impl<'window> Phi<'window> {
@@ -31,12 +38,25 @@ impl<'window> Phi<'window> {
         Phi {
             events: events,
             renderer: renderer,
+
+            cached_fonts: HashMap::new(),
         }
     }
 
     pub fn output_size(&self) -> (f64, f64) {
         let (w, h) = self.renderer.output_size().unwrap();
         (w as f64, h as f64)
+    }
+
+    pub fn ttf_str_sprite(&mut self, text: &str, font_path: &'static str, size: i32, color: Color) -> Option<Sprite> {
+        if let Some(font) = self.cached_fonts.get(&(font_path, size)) {
+            return font.render(text, ::sdl2_ttf::blended(color)).ok()
+                .and_then(|surface| self.renderer.create_texture_from_surface(&surface).ok()).map(Sprite::new);
+        }
+
+        let font = ::sdl2_ttf::Font::from_file(Path::new(font_path), size).ok().unwrap();
+        let surface = font.render(text, ::sdl2_ttf::blended(color)).ok().unwrap();
+        Some(Sprite::new(self.renderer.create_texture_from_surface(&surface).ok().unwrap()))
     }
 }
 
@@ -64,7 +84,8 @@ pub fn spawn<F>(title: &str, init: F)
 where F: Fn(&mut Phi) -> Box<View> {
     let sdl_context = ::sdl2::init().unwrap();
     let video = sdl_context.video().unwrap();
-    let mut timer_subs = sdl_context.timer().unwrap();
+    let mut timer = sdl_context.timer().unwrap();
+    let _ttf_context = ::sdl2_ttf::init();
 
     let window = video.window(title, 800, 600)
         .position_centered().opengl().resizable()
@@ -80,17 +101,17 @@ where F: Fn(&mut Phi) -> Box<View> {
     current_view.resume(&mut context);
 
     let interval = 1000/60;
-    let mut before = timer_subs.ticks();
-    let mut last_second = timer_subs.ticks();
+    let mut before = timer.ticks();
+    let mut last_second = timer.ticks();
     let mut fps = 0u16;
 
     loop {
-        let now = timer_subs.ticks();
+        let now = timer.ticks();
         let dt = now - before;
         let elapsed = dt as f64 / 1000.;
 
         if dt < interval {
-            timer_subs.delay(interval - dt);
+            timer.delay(interval - dt);
             continue;
         }
 
